@@ -3,7 +3,7 @@ import torch.nn as nn
 from .networks import *
 
 class Generator(nn.Module):
-    def __init__(self, input_nc=3, output_nc=3, ngf=64, n_blocks=6, img_size=256, light=False):
+    def __init__(self, input_nc=3, output_nc=3, ngf=64, n_blocks=6, img_size=256, light=False, no_learning=False):
         assert(n_blocks >= 0)
         super(Generator,self).__init__()
         self.input_nc = input_nc
@@ -11,7 +11,13 @@ class Generator(nn.Module):
         self.ngf = ngf
         self.n_blocks = n_blocks
         self.img_size = img_size
+
+        # light mode for low RAM device
         self.light = light
+
+        # if model only for inference without learning needed
+        # exclude outputs only used in learning
+        self.no_learning = no_learning
 
         DownBlock = []
         DownBlock += [nn.ReflectionPad2d(3),
@@ -81,20 +87,23 @@ class Generator(nn.Module):
         x = self.DownBlock(input)
 
         gap = torch.nn.functional.adaptive_avg_pool2d(x, 1)
-        gap_logit = self.gap_fc(gap.view(x.shape[0], -1))
         gap_weight = list(self.gap_fc.parameters())[0]
         gap = x * gap_weight.unsqueeze(2).unsqueeze(3)
 
         gmp = torch.nn.functional.adaptive_max_pool2d(x, 1)
-        gmp_logit = self.gmp_fc(gmp.view(x.shape[0], -1))
         gmp_weight = list(self.gmp_fc.parameters())[0]
         gmp = x * gmp_weight.unsqueeze(2).unsqueeze(3)
 
-        cam_logit = torch.cat([gap_logit, gmp_logit], 1)
+        if not self.no_learning:
+            gap_logit = self.gap_fc(gap.view(x.shape[0], -1))
+            gmp_logit = self.gmp_fc(gmp.view(x.shape[0], -1))
+            cam_logit = torch.cat([gap_logit, gmp_logit], 1)
+
         x = torch.cat([gap, gmp], 1)
         x = self.relu(self.conv1x1(x))
 
-        heatmap = torch.sum(x, dim=1, keepdim=True)
+        if not self.no_learning:
+            heatmap = torch.sum(x, dim=1, keepdim=True)
 
         if self.light:
             x_ = torch.nn.functional.adaptive_avg_pool2d(x, 1)
@@ -108,7 +117,10 @@ class Generator(nn.Module):
             x = getattr(self, 'UpBlock1_' + str(i+1))(x, gamma, beta)
         out = self.UpBlock2(x)
 
-        return out, cam_logit, heatmap
+        if cam_logit and heatmap:
+            return out, cam_logit, heatmap
+        else:
+            return out
 
 
 # used after generator's backpropagation
