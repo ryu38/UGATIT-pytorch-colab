@@ -87,16 +87,18 @@ class Generator(nn.Module):
         x = self.DownBlock(input)
 
         gap = torch.nn.functional.adaptive_avg_pool2d(x, 1)
+        if not self.no_learning:
+            gap_logit = self.gap_fc(gap.view(x.shape[0], -1))
         gap_weight = list(self.gap_fc.parameters())[0]
         gap = x * gap_weight.unsqueeze(2).unsqueeze(3)
 
         gmp = torch.nn.functional.adaptive_max_pool2d(x, 1)
+        if not self.no_learning:
+            gmp_logit = self.gmp_fc(gmp.view(x.shape[0], -1))
         gmp_weight = list(self.gmp_fc.parameters())[0]
         gmp = x * gmp_weight.unsqueeze(2).unsqueeze(3)
 
         if not self.no_learning:
-            gap_logit = self.gap_fc(gap.view(x.shape[0], -1))
-            gmp_logit = self.gmp_fc(gmp.view(x.shape[0], -1))
             cam_logit = torch.cat([gap_logit, gmp_logit], 1)
 
         x = torch.cat([gap, gmp], 1)
@@ -117,7 +119,7 @@ class Generator(nn.Module):
             x = getattr(self, 'UpBlock1_' + str(i+1))(x, gamma, beta)
         out = self.UpBlock2(x)
 
-        if cam_logit and heatmap:
+        if not self.no_learning:
             return out, cam_logit, heatmap
         else:
             return out
