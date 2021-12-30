@@ -3,7 +3,7 @@ import torch.nn as nn
 from .networks import *
 
 class Generator(nn.Module):
-    def __init__(self, input_nc=3, output_nc=3, ngf=64, n_blocks=6, img_size=256, light=False, no_learning=False):
+    def __init__(self, input_nc=3, output_nc=3, ngf=64, n_blocks=6, img_size=256, light=False, simple_output=False, for_quant=False):
         assert(n_blocks >= 0)
         super(Generator,self).__init__()
         self.input_nc = input_nc
@@ -17,7 +17,11 @@ class Generator(nn.Module):
 
         # if model only for inference without learning needed
         # exclude outputs only used in learning
-        self.no_learning = no_learning
+        self.simple_output = simple_output
+
+        # nn.Module.parameters() is not available after quantized
+        # so use weight() instead
+        self.for_quant = for_quant
 
         DownBlock = []
         DownBlock += [nn.ReflectionPad2d(3),
@@ -87,24 +91,24 @@ class Generator(nn.Module):
         x = self.DownBlock(input)
 
         gap = torch.nn.functional.adaptive_avg_pool2d(x, 1)
-        if not self.no_learning:
+        if not self.simple_output:
             gap_logit = self.gap_fc(gap.view(x.shape[0], -1))
-        gap_weight = list(self.gap_fc.parameters())[0]
+        gap_weight = list(self.gap_fc.parameters())[0] if not self.for_quant else self.gap_fc.weight()
         gap = x * gap_weight.unsqueeze(2).unsqueeze(3)
 
         gmp = torch.nn.functional.adaptive_max_pool2d(x, 1)
-        if not self.no_learning:
+        if not self.simple_output:
             gmp_logit = self.gmp_fc(gmp.view(x.shape[0], -1))
-        gmp_weight = list(self.gmp_fc.parameters())[0]
+        gmp_weight = list(self.gmp_fc.parameters())[0] if not self.for_quant else self.gmp_fc.weight()
         gmp = x * gmp_weight.unsqueeze(2).unsqueeze(3)
 
-        if not self.no_learning:
+        if not self.simple_output:
             cam_logit = torch.cat([gap_logit, gmp_logit], 1)
 
         x = torch.cat([gap, gmp], 1)
         x = self.relu(self.conv1x1(x))
 
-        if not self.no_learning:
+        if not self.simple_output:
             heatmap = torch.sum(x, dim=1, keepdim=True)
 
         if self.light:
@@ -119,7 +123,7 @@ class Generator(nn.Module):
             x = getattr(self, 'UpBlock1_' + str(i+1))(x, gamma, beta)
         out = self.UpBlock2(x)
 
-        if not self.no_learning:
+        if not self.simple_output:
             return out, cam_logit, heatmap
         else:
             return out
