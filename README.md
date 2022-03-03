@@ -1,5 +1,5 @@
 # UGATIT-pytorch-colab
-Samples for training UGATIT in Google Colab with pytorch
+Examples for training UGATIT in Google Colab with pytorch
 
 [About UGATIT](https://arxiv.org/pdf/1907.10830.pdf)
 
